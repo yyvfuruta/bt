@@ -95,10 +95,27 @@ estados próprios e não podem ser aceitos como novas autorizações.
 
 ## Instalação
 
-Requer Linux, BlueZ 5, D-Bus do sistema e Go 1.23 ou superior para compilar.
+Requer Linux, BlueZ 5 e D-Bus do sistema. Para compilar, requer Go 1.23 ou superior.
 Instale os pacotes `bluez` e `dbus` da sua distribuição e mantenha o serviço
 `bluetooth` ativo. O uso normal deve ocorrer na sua sessão de usuário, sem sudo;
 as permissões são determinadas pelas políticas D-Bus/Polkit da distribuição.
+
+### Binário pronto
+
+Baixe o `.tar.gz` para sua arquitetura no
+[release v0.0.1](https://github.com/yyvfuruta/bt/releases/tag/v0.0.1):
+`bt_0.0.1_linux_amd64.tar.gz` ou `bt_0.0.1_linux_arm64.tar.gz`.
+Depois de baixar, por exemplo em amd64:
+
+```sh
+tar -xzf bt_0.0.1_linux_amd64.tar.gz bt
+install -Dm755 bt "$HOME/.local/bin/bt"
+bt --version
+```
+
+O release inclui checksums SHA-256. Binários prontos não precisam de Go instalado.
+
+### Compilar
 
 ```sh
 make build
@@ -302,6 +319,28 @@ vínculos ou desligar adaptadores.
 
 Organização: `cmd/bt` contém comandos; `internal/bluez`, transporte e agente;
 `internal/core`, nomes, cache e solicitações; `internal/tui`, a interface.
+
+## Releases
+
+O workflow [release.yml](.github/workflows/release.yml) roda ao enviar tags `v*`.
+Ele usa GoReleaser v2.20.0 para compilar Linux amd64 e arm64 e publicar o GitHub
+Release com arquivos `.tar.gz` e checksums. A versão de `bt --version` vem da tag.
+A pipeline executa somente build e publicação; as verificações de desenvolvimento
+continuam disponíveis via `make check` e `make terminal-test`.
+
+Configuração em [.goreleaser.yaml](.goreleaser.yaml). Para validar localmente:
+
+```sh
+goreleaser check
+goreleaser release --snapshot --clean --skip=publish
+```
+
+Para publicar uma próxima versão, faça commit das mudanças, crie a tag e envie:
+
+```sh
+git tag -a v0.0.2 -m "Release v0.0.2"
+git push origin main v0.0.2
+```
 
 Referências: [Agent1](https://bluez.readthedocs.io/en/latest/agent-api/),
 [Device1](https://bluez.readthedocs.io/en/latest/device-api/) e

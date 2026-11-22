@@ -17,6 +17,9 @@ import (
 	"github.com/yyvfuruta/bt/internal/tui"
 )
 
+// Set by GoReleaser from the release tag.
+var version = "dev"
+
 const help = `bt — Bluetooth para Linux via BlueZ/D-Bus
 
 Uso:
@@ -144,7 +147,7 @@ func run(ctx context.Context, o options, out io.Writer) error {
 		_, err := fmt.Fprint(out, help)
 		return err
 	case "--version":
-		_, err := fmt.Fprintln(out, "bt 0.1.0")
+		_, err := fmt.Fprintln(out, "bt "+version)
 		return err
 	case "", "scan", "devices", "status":
 		if len(o.args) > 1 {
