@@ -4,6 +4,35 @@ CLI Bluetooth para Linux, escrita em Go e conectada diretamente ao BlueZ por
 D-Bus. `bt` abre uma interface de teclado; os subcomandos servem para uso direto
 e scripts. Não executa `bluetoothctl` nem depende de sua saída.
 
+## Como aparece no terminal
+
+Exemplo ilustrativo da interface atual, com nomes, endereços e bateria fictícios:
+
+```text
+bt · Bluetooth
+
+Meu notebook · /org/bluez/hci0 · ligado · buscando (1 adaptadores)
+dispositivos · filtro all · busca ""
+  Nome                                     Tipo         Conexão  Pareado Bateria
+  Meu Fone                                 audio-headset sim      sim     82%
+> Teclado                                  periférico   não      não     —
+  Dispositivo sem nome · 02:00:00:00:00:03  desconhecido não      não     —
+Detalhe: 02:00:00:00:00:02 · /org/bluez/hci0 · pair
+
+SOLICITAÇÕES · 1 pendentes · Tab alterna foco · y aceita / n rejeita
+> #1 PENDENTE · 45s · 02:00:00:00:00:02 · Teclado
+Pedido: confirm · Confirme a chave 000042 nos dois dispositivos
+
+Evento: Meu Fone conectou (evento informativo, sem resposta)
+Aviso: Tab abre solicitações. Nenhuma autorização é automática.
+↑↓ navegar · / buscar · f filtro · a adaptador · s busca · o liga/desliga
+c conectar · d desconectar · p parear · x cancelar · n apelido · F esquecer · q sair
+```
+
+O `>` marca a seleção em cada painel; o título em maiúsculas indica o painel
+com foco. Neste exemplo, Tab volta à lista para continuar navegando enquanto
+a confirmação aguarda. Com foco em solicitações, `y` aceita e `n` rejeita.
+
 ## Instalação
 
 Requer Linux, BlueZ 5, D-Bus do sistema e Go 1.23 ou superior para compilar.
