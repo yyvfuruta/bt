@@ -6,39 +6,60 @@ e scripts. Não executa `bluetoothctl` nem depende de sua saída.
 
 ## Como aparece no terminal
 
-Navegação por recursos, inspirada nos [comandos do k9s](https://k9scli.io/topics/commands/): uma visão por vez, filtro próprio e
-detalhes sob demanda. Exemplo em um terminal de 60×18, com dados fictícios:
+Tabelas por recurso, com cabeçalhos e divisórias, inspiradas no
+[Sofka](https://sofka.rs/) e nos [comandos do k9s](https://k9scli.io/topics/commands/).
+Exemplo em um terminal de 80×18, com dados fictícios:
 
 ```text
 bt · hci0 · buscando…
 devices [3]
-╭──────────────────────────────────────────────────────────╮
-│ > Meu Fone · conectado · 82%                              │
-│   Teclado                                                │
-│   Dispositivo sem nome · 02:00:00:00:00:03                 │
-│                                                          │
-│                                                          │
-│                                                          │
-│                                                          │
-│                                                          │
-│                                                          │
-│                                                          │
-│                                                          │
-╰──────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────╮
+│   NOME               │ TIPO               │ CONEXÃO      │ PAREADO │ BATERIA │
+│   ───────────────────┼────────────────────┼──────────────┼─────────┼──────── │
+│ > Meu Fone           │ fone de ouvido     │ conectado    │ sim     │ 82%     │
+│   Teclado            │ teclado            │ desconectado │ não     │ —       │
+│   Dispositivo sem    │ desconhecido       │ desconectado │ não     │ —       │
+│   nome ·             │                    │              │         │         │
+│   02:00:00:00:00:03  │                    │              │         │         │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
 1 pedido pendente · :requests
 Enter detalhes · : recursos · / filtrar
 Tab visões · ? ajuda · q sair
 ```
 
-O `>` marca o registro selecionado. A lista principal mostra nome, conexão e
-bateria disponível. Enter abre tipo, pareamento, MAC e ações nos detalhes;
-Esc volta à lista. Pedidos ficam em sua própria visão, com um aviso curto nas
-outras telas. Nenhuma solicitação rouba o foco ou é aceita automaticamente.
+O `>` marca o registro selecionado. As colunas se adaptam à largura: nome,
+conexão e bateria têm prioridade; tipo, pareamento e MAC aparecem conforme o
+espaço. Um cabeçalho visível é sempre exibido inteiro. Enter abre todos os
+campos e ações, e Esc volta à tabela. Nomes longos usam reticências; dispositivos
+sem nome quebram em linhas para preservar o identificador completo.
+
+Pedidos ficam em sua própria visão, com um aviso curto nas outras telas.
+Nenhuma solicitação rouba o foco ou é aceita automaticamente.
 
 ### Recursos e busca
 
 Pressione `:` para escolher o tipo, digite seu nome ou apelido e Enter. ↑/↓
 seleciona uma sugestão. Tab e Shift+Tab alternam as visões diretamente.
+
+O seletor separa recurso e descrição em colunas, com espaço entre as opções.
+Trecho em um terminal de 60 colunas:
+
+```text
+  RECURSO      │ DESCRIÇÃO
+  ─────────────┼────────────────────────────────────────
+> devices      │ Dispositivos conhecidos pelo BlueZ
+
+  connections  │ Links Bluetooth conectados neste
+               │ momento
+
+  adapters     │ Controladores Bluetooth e alimentação
+
+  requests     │ Pareamento, autorização e instruções
+```
 
 | Comando interativo | Apelido | Registros |
 |---|---|---|
@@ -46,6 +67,11 @@ seleciona uma sugestão. Tab e Shift+Tab alternam as visões diretamente.
 | `:connections` | `:conn` | Links Bluetooth conectados no adaptador ativo |
 | `:adapters` | `:ad` | Adaptadores, alimentação e descoberta |
 | `:requests` | `:req` | Pedidos, instruções de pareamento e histórico |
+
+Cada recurso possui suas próprias colunas: conexão e bateria para dispositivos,
+estado e descoberta para adaptadores, tipo de solicitação, estado e prazo para
+pedidos. As informações completas permanecem nos detalhes, inclusive quando
+uma coluna não cabe na largura atual.
 
 `/` busca registros da visão atual por texto, sem distinguir maiúsculas.
 Cada recurso preserva seu filtro quando você troca de visão. Exemplos:
@@ -247,7 +273,9 @@ Os testes cobrem nomes e ambiguidade, ordem estável, seleção, filtros,
 persistência/mesclagem/remoção, respostas explícitas e concorrentes, validação de
 PIN/chave, cancelamento, expiração, decodificação e seleção de adaptadores.
 A renderização é validada de 48×18 a 140×40, incluindo nomes Unicode, textos
-longos, edição e pedidos pendentes. Há testes de escolha e busca de recursos,
+longos, edição e pedidos pendentes. Os testes também conferem alinhamento das
+colunas em todas as larguras de 48 a 140, cabeçalhos completos, identificadores
+de desconhecidos e seleção visível ao rolar o seletor. Há testes de escolha e busca de recursos,
 filtros independentes, ciclo de vida das conexões e autorização somente após
 abrir o pedido.
 Os testes de protocolo iniciam um barramento privado com um serviço de teste;

@@ -59,7 +59,7 @@ func assertFits(t *testing.T, m model) string {
 	return view
 }
 
-func TestResourceLayoutFitsAndKeepsMainViewQuiet(t *testing.T) {
+func TestResourceColumnsFitTerminal(t *testing.T) {
 	for _, size := range [][2]int{{48, 18}, {60, 20}, {80, 24}, {100, 30}, {140, 40}} {
 		t.Run(fmt.Sprint(size), func(t *testing.T) {
 			m := layoutModel(t)
@@ -70,7 +70,7 @@ func TestResourceLayoutFitsAndKeepsMainViewQuiet(t *testing.T) {
 					t.Fatalf("missing %q:\n%s", text, view)
 				}
 			}
-			for _, text := range []string{"Pareado:", "MAC:", "fone de ouvido", "bateria —", "nenhuma pendente"} {
+			for _, text := range []string{"Pareado:", "MAC:", "bateria —", "nenhuma pendente"} {
 				if strings.Contains(view, text) {
 					t.Fatalf("main view cluttered by %q", text)
 				}

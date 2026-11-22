@@ -48,7 +48,7 @@ func (m model) View() string {
 	var body []string
 	switch {
 	case m.mode == "command":
-		body = content.resourceChooser()
+		body = content.resourceChooser(budget)
 	case m.showHelp:
 		all := content.helpLines()
 		start := min(m.detailScroll, max(0, len(all)-budget))
@@ -57,44 +57,12 @@ func (m model) View() string {
 		all := content.detailLines()
 		start := min(m.detailScroll, max(0, len(all)-budget))
 		body = all[start:min(len(all), start+budget)]
-	case m.resourceKind() == adaptersResource:
-		selected := 0
-		items := [][]string{}
-		for i, a := range m.adapterRows() {
-			if a.Path == m.adapterCursor {
-				selected = i
-			}
-			name := core.Clean(a.Name)
-			if name == "" {
-				name = strings.TrimPrefix(a.Path, "/org/bluez/")
-			}
-			state := "desligado"
-			if a.Powered {
-				state = "ligado"
-			}
-			if a.Path == m.adapter {
-				state += " · ativo"
-			}
-			items = append(items, content.listItem(a.Path == m.adapterCursor, name+" · "+state))
-		}
-		body = viewport(items, selected, budget)
-	case m.resourceKind() == requestsResource:
-		selected := 0
-		items := [][]string{}
-		for i, r := range m.requestRows() {
-			if r.ID == m.requestID {
-				selected = i
-			}
-			name, _ := m.requestIdentity(r)
-			items = append(items, content.listItem(r.ID == m.requestID, name+" · "+requestState(r.State)))
-		}
-		body = viewport(items, selected, budget)
-		if m.event != "" {
+	default:
+		body = content.resourceTable(budget)
+		if m.resourceKind() == requestsResource && m.event != "" {
 			event := strings.TrimSuffix(m.event, " (evento informativo, sem resposta)")
 			body = append(body, wrap("Evento informativo: "+event, content.width)...)
 		}
-	default:
-		body = content.deviceViewport(m.rows(), budget)
 	}
 	if len(body) == 0 {
 		body = wrap("Nenhum registro. / filtra; : troca recurso.", content.width)
@@ -169,45 +137,6 @@ func (m model) requestBanner() []string {
 		return wrap("Instruções de pareamento · :requests", m.width)
 	}
 	return nil
-}
-func (m model) listItem(selected bool, text string) []string {
-	lines := limited(wrap(text, m.width-2), 2, m.width-2)
-	for i := range lines {
-		prefix := "  "
-		if i == 0 && selected {
-			prefix = "> "
-		}
-		lines[i] = prefix + lines[i]
-	}
-	return lines
-}
-func (m model) deviceViewport(rows []core.Device, budget int) []string {
-	if len(rows) == 0 {
-		text := "Nenhum dispositivo. s inicia busca."
-		if m.resourceKind() == connectionsResource {
-			text = "Nenhuma conexão ativa."
-		}
-		return wrap(text, m.width)
-	}
-	items := [][]string{}
-	selected := 0
-	for i, d := range rows {
-		if d.Path == m.selected {
-			selected = i
-		}
-		label := d.Label()
-		if d.Connected {
-			label += " · conectado"
-		}
-		if d.Battery != nil {
-			label += fmt.Sprintf(" · %d%%", *d.Battery)
-		}
-		if action := m.busy[d.Path]; action != "" {
-			label += " · " + action
-		}
-		items = append(items, m.listItem(d.Path == m.selected, label))
-	}
-	return viewport(items, selected, budget)
 }
 func viewport(items [][]string, selected, budget int) []string {
 	if len(items) == 0 {
@@ -291,17 +220,6 @@ func (m model) requestIdentity(r core.Request) (string, string) {
 		}
 	}
 	return "Dispositivo indisponível", r.Device
-}
-func (m model) resourceChooser() []string {
-	var lines []string
-	for i, r := range resourceMatches(m.input) {
-		lines = append(lines, m.listItem(i == m.commandIndex, string(r.kind)+" · "+r.label)...)
-		lines = append(lines, wrap("  "+r.description, m.width)...)
-	}
-	if len(lines) == 0 {
-		return []string{"Recurso desconhecido."}
-	}
-	return lines
 }
 func (m model) helpLines() []string {
 	var lines []string
