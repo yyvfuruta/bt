@@ -90,8 +90,11 @@ func TestTerminalRestoration(t *testing.T) {
 		t.Fatal(err)
 	}
 	address = strings.TrimSpace(address)
-	for _, how := range []string{"q", "ctrl-c", "sigterm"} {
-		t.Run(how, func(t *testing.T) {
+	for _, tc := range []struct {
+		how        string
+		cols, rows uint16
+	}{{"q", 48, 18}, {"ctrl-c", 80, 24}, {"sigterm", 100, 30}} {
+		t.Run(tc.how, func(t *testing.T) {
 			master, err := os.OpenFile("/dev/ptmx", os.O_RDWR|unix.O_NOCTTY, 0600)
 			if err != nil {
 				t.Fatal(err)
@@ -110,7 +113,7 @@ func TestTerminalRestoration(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer slave.Close()
-			if err = unix.IoctlSetWinsize(int(slave.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: 30, Col: 100}); err != nil {
+			if err = unix.IoctlSetWinsize(int(slave.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: tc.rows, Col: tc.cols}); err != nil {
 				t.Fatal(err)
 			}
 			before, err := unix.IoctlGetTermios(int(slave.Fd()), unix.TCGETS)
@@ -128,7 +131,7 @@ func TestTerminalRestoration(t *testing.T) {
 			defer func() { _ = cmd.Process.Kill() }()
 			output := &terminalOutput{changed: make(chan struct{}, 1)}
 			go output.read(master)
-			output.wait(t, "Tab alterna foco")
+			output.wait(t, "Tab pedidos")
 			raw, err := unix.IoctlGetTermios(int(slave.Fd()), unix.TCGETS)
 			if err != nil {
 				t.Fatal(err)
@@ -136,7 +139,7 @@ func TestTerminalRestoration(t *testing.T) {
 			if raw.Lflag&unix.ICANON != 0 {
 				t.Fatal("interface não entrou em modo raw")
 			}
-			switch how {
+			switch tc.how {
 			case "sigterm":
 				err = cmd.Process.Signal(syscall.SIGTERM)
 			case "q":

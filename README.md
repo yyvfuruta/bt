@@ -6,32 +6,36 @@ e scripts. Não executa `bluetoothctl` nem depende de sua saída.
 
 ## Como aparece no terminal
 
-Exemplo ilustrativo da interface atual, com nomes, endereços e bateria fictícios:
+Interface simples, sem colunas fixas: o nome vem primeiro e o estado fica logo
+abaixo. Exemplo em um terminal de 60×20, com dados fictícios:
 
 ```text
-bt · Bluetooth
+bt · hci0 · ligado · buscando
+> Dispositivos · todos · 2/3
+  Meu Fone
+    fone de ouvido · conectado · pareado · bateria 82%
+> Teclado
+    teclado · desconectado · não pareado · bateria —
+  Dispositivo sem nome · 02:00:00:00:00:03
+    desconhecido · desconectado · não pareado · bateria —
 
-Meu notebook · /org/bluez/hci0 · ligado · buscando (1 adaptadores)
-dispositivos · filtro all · busca ""
-  Nome                                     Tipo         Conexão  Pareado Bateria
-  Meu Fone                                 audio-headset sim      sim     82%
-> Teclado                                  periférico   não      não     —
-  Dispositivo sem nome · 02:00:00:00:00:03  desconhecido não      não     —
-Detalhe: 02:00:00:00:00:02 · /org/bluez/hci0 · pair
 
-SOLICITAÇÕES · 1 pendentes · Tab alterna foco · y aceita / n rejeita
-> #1 PENDENTE · 45s · 02:00:00:00:00:02 · Teclado
-Pedido: confirm · Confirme a chave 000042 nos dois dispositivos
+MAC 02:00:00:00:00:02
 
-Evento: Meu Fone conectou (evento informativo, sem resposta)
-Aviso: Tab abre solicitações. Nenhuma autorização é automática.
-↑↓ navegar · / buscar · f filtro · a adaptador · s busca · o liga/desliga
-c conectar · d desconectar · p parear · x cancelar · n apelido · F esquecer · q sair
+  Pedidos · 1 pendente · Tab responder
+Pendente · expira em 45s
+Teclado
+MAC 02:00:00:00:00:02
+Confirme a chave 000042 nos dois dispositivos
+
+↑↓ navegar · Enter conectar · / buscar
+s busca · Tab pedidos · ? ajuda · q sair
 ```
 
-O `>` marca a seleção em cada painel; o título em maiúsculas indica o painel
-com foco. Neste exemplo, Tab volta à lista para continuar navegando enquanto
-a confirmação aguarda. Com foco em solicitações, `y` aceita e `n` rejeita.
+O `>` marca o painel com foco e o dispositivo selecionado. Enter conecta ou
+desconecta. Tab abre o pedido para aceitar com `y` ou rejeitar com `n`; outro Tab
+volta à lista. `?` abre todos os atalhos. O texto do estado quebra em linhas
+quando falta largura, e os pedidos e atalhos ficam reservados no rodapé.
 
 ## Instalação
 
@@ -58,12 +62,14 @@ Inclua `~/.local/bin` no `PATH`. Nenhuma biblioteca C de Bluetooth é necessári
 
 ## Interface
 
-Use um terminal de pelo menos 80 colunas e 22 linhas; 100×30 é mais confortável.
+Use um terminal de pelo menos 48 colunas e 18 linhas; 80×24 é mais confortável.
 A busca por rádio começa somente quando você a solicita.
 
 | Tecla | Ação |
 |---|---|
 | ↑/↓ ou j/k | Navegar na lista com foco |
+| Enter na lista | Conectar ou desconectar o dispositivo selecionado |
+| ? | Mostrar atalhos; ? ou Esc volta à lista |
 | / | Editar busca; Enter aplica, Esc sai da edição |
 | f | Alternar todos, conectados, pareados e não pareados |
 | Esc fora da edição | Limpar busca e filtro |
@@ -208,6 +214,9 @@ make terminal-test           # Go + dbus-daemon + pseudoterminal Linux
 Os testes cobrem nomes e ambiguidade, ordem estável, seleção, filtros,
 persistência/mesclagem/remoção, respostas explícitas e concorrentes, validação de
 PIN/chave, cancelamento, expiração, decodificação e seleção de adaptadores.
+A renderização é validada de 48×18 a 140×40, incluindo nomes Unicode, textos
+longos, edição e pedidos pendentes, para manter estado, código, identidade e
+ações dentro do terminal.
 Os testes de protocolo iniciam um barramento privado com um serviço de teste;
 verificam chamadas D-Bus reais, sinais, agente, rejeição de remetente falso e
 continuidade de leitura durante uma solicitação pendente. São fixtures de teste,

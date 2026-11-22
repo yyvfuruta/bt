@@ -4,11 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/yyvfuruta/bt/internal/bluez"
 	"github.com/yyvfuruta/bt/internal/core"
 	"golang.org/x/term"
@@ -40,6 +38,7 @@ type model struct {
 	selected                   string
 	requestID                  uint64
 	focusRequests              bool
+	showHelp                   bool
 	query, filter, mode, input string
 	editDevice                 core.Device
 	editRequest                uint64
@@ -61,7 +60,7 @@ func Run(ctx context.Context, c *bluez.Client, store *core.Store, options Option
 	setupCtx, setupCancel := context.WithTimeout(ctx, 5*time.Second)
 	ready, err := c.RegisterAgent(setupCtx, queue, true, true)
 	setupCancel()
-	notice := "Tab abre solicitações. Nenhuma autorização é automática."
+	notice := ""
 	if err != nil {
 		notice = "Agente: " + err.Error() + ". Saia e abra bt novamente para tentar registrar."
 	}
@@ -232,6 +231,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key == "ctrl+c" {
 			return m, tea.Quit
 		}
+		if m.showHelp {
+			switch key {
+			case "?", "esc":
+				m.showHelp = false
+			case "q":
+				return m, tea.Quit
+			}
+			return m, nil
+		}
 		if m.mode != "" {
 			switch key {
 			case "esc":
@@ -282,6 +290,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch key {
+		case "?":
+			m.showHelp = true
 		case "q":
 			return m, tea.Quit
 		case "tab":
@@ -421,7 +431,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return resultMsg{key, core.Device{Path: a.Path}, err}
 			}
-		case "c", "d", "p", "x", "F":
+		case "enter", "c", "d", "p", "x", "F":
 			if m.focusRequests {
 				return m, nil
 			}
@@ -431,6 +441,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			action := map[string]string{"c": "connect", "d": "disconnect", "p": "pair", "x": "cancel", "F": "forget"}[key]
+			if key == "enter" {
+				action = "connect"
+				if d.Connected {
+					action = "disconnect"
+				}
+			}
 			if (action == "pair" || action == "connect") && (!m.agentReady || m.client.Agent == nil || !m.client.Agent.Active.Load()) {
 				m.notice = "Agente indisponível; saia e abra bt novamente antes de parear/conectar"
 				return m, nil
@@ -450,148 +466,4 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
-}
-
-func (m model) View() string {
-	lines := []string{"bt · Bluetooth", ""}
-	if a, ok := m.adapterValue(); ok {
-		power := "desligado"
-		if a.Powered {
-			power = "ligado"
-		}
-		scan := ""
-		if a.Discovering {
-			scan = " · buscando"
-		}
-		lines = append(lines, fmt.Sprintf("%s · %s · %s%s (%d adaptadores)", core.Clean(a.Name), a.Path, power, scan, len(m.adapters)))
-	} else {
-		lines = append(lines, "Nenhum adaptador disponível · verifique BlueZ, drivers e rfkill list; a alterna adaptador")
-	}
-	focus := "DISPOSITIVOS"
-	if m.focusRequests {
-		focus = "dispositivos"
-	}
-	lines = append(lines, fmt.Sprintf("%s · filtro %s · busca %q", focus, m.filter, m.query), "  "+cell("Nome", 40)+" "+cell("Tipo", 12)+" Conexão  Pareado Bateria")
-	rows := m.rows()
-	selectedIndex := 0
-	for i, d := range rows {
-		if d.Path == m.selected {
-			selectedIndex = i
-		}
-	}
-	count := m.height - 21
-	if count < 2 {
-		count = 2
-	}
-	start := selectedIndex - count/2
-	if start < 0 {
-		start = 0
-	}
-	end := start + count
-	if end > len(rows) {
-		end = len(rows)
-	}
-	for i := start; i < end; i++ {
-		d := rows[i]
-		marker := " "
-		if d.Path == m.selected {
-			marker = ">"
-		}
-		connected := "não"
-		if d.Connected {
-			connected = "sim"
-		}
-		paired := "não"
-		if d.Paired {
-			paired = "sim"
-		}
-		battery := "—"
-		if d.Battery != nil {
-			battery = fmt.Sprintf("%d%%", *d.Battery)
-		}
-		lines = append(lines, fmt.Sprintf("%s %s %s %-8s %-7s %s", marker, cell(d.Label(), 40), cell(core.Clean(d.Type), 12), connected, paired, battery))
-	}
-	if len(rows) == 0 {
-		lines = append(lines, "  Nenhum dispositivo neste filtro. s inicia busca; o liga Bluetooth.")
-	}
-	if d, ok := m.device(); ok {
-		lines = append(lines, fmt.Sprintf("Detalhe: %s · %s · %s", d.Address, d.Adapter, m.busy[d.Path]))
-	} else {
-		lines = append(lines, "Seleção indisponível; use as setas para selecionar.")
-	}
-	rs := m.requests.Snapshot()
-	pending := 0
-	for _, r := range rs {
-		if r.State == "pending" {
-			pending++
-		}
-	}
-	title := "solicitações"
-	if m.focusRequests {
-		title = "SOLICITAÇÕES"
-	}
-	lines = append(lines, "", fmt.Sprintf("%s · %d pendentes · Tab alterna foco · y aceita / n rejeita", title, pending))
-	if len(rs) == 0 {
-		lines = append(lines, "  Nenhuma solicitação. Eventos de conexão não exigem resposta.")
-	} else {
-		idx := len(rs) - 1
-		for i, r := range rs {
-			if r.ID == m.requestID {
-				idx = i
-			}
-		}
-		lo := idx - 1
-		if lo < 0 {
-			lo = 0
-		}
-		hi := lo + 3
-		if hi > len(rs) {
-			hi = len(rs)
-		}
-		for _, r := range rs[lo:hi] {
-			marker := " "
-			if r.ID == m.requestID {
-				marker = ">"
-			}
-			name := r.Device
-			for _, d := range m.devices {
-				if d.Path == r.Device {
-					name = d.Address + " · " + d.Label()
-				}
-			}
-			state := map[string]string{"pending": "PENDENTE", "accepted": "aceita", "rejected": "rejeitada", "expired": "expirada", "canceled": "cancelada", "info": "INFORMATIVO — sem resposta"}[r.State]
-			if r.State == "pending" {
-				left := time.Until(r.Deadline).Round(time.Second)
-				if left < 0 {
-					left = 0
-				}
-				state += " · " + left.String()
-			}
-			lines = append(lines, fmt.Sprintf("%s #%d %s · %s", marker, r.ID, state, name))
-		}
-		lines = append(lines, "Pedido: "+rs[idx].Kind+" · "+rs[idx].Detail)
-	}
-	lines = append(lines, "", "Evento: "+core.Clean(m.event), "Aviso: "+core.Clean(m.notice))
-	if m.mode != "" {
-		prompt := map[string]string{"search": "Buscar (Enter aplica)", "nickname": "Apelido (vazio remove)", "forget": "Digite esquecer para remover pareamento e nome local", "answer": "PIN/chave: Enter envia, Esc cancela edição"}[m.mode]
-		value := m.input
-		if m.mode == "answer" {
-			value = strings.Repeat("•", len([]rune(value)))
-		}
-		lines = append(lines, prompt+": "+value+"▏")
-	} else {
-		lines = append(lines, "↑↓ navegar · / buscar · f filtro · a adaptador · s busca · o liga/desliga", "c conectar · d desconectar · p parear · x cancelar · n apelido · F esquecer · q sair")
-	}
-	if m.height < 22 || m.width < 80 {
-		return "bt: terminal pequeno; amplie para pelo menos 80×22. q ou Ctrl+C sai.\n"
-	}
-	for i := range lines {
-		lines[i] = ansi.Truncate(lines[i], m.width, "…")
-	}
-	return strings.Join(lines, "\n") + "\n"
-}
-
-func cell(s string, width int) string {
-	s = ansi.Truncate(s, width, "…")
-	return s + strings.Repeat(" ", width-ansi.StringWidth(s))
 }
