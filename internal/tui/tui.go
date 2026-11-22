@@ -27,6 +27,8 @@ type resultMsg struct {
 	err    error
 }
 
+type Options struct{ Adapter, Query, Filter string }
+
 type model struct {
 	ctx                        context.Context
 	client                     *bluez.Client
@@ -49,7 +51,7 @@ type model struct {
 	busy                       map[string]string
 }
 
-func Run(ctx context.Context, c *bluez.Client, store *core.Store, adapter string) error {
+func Run(ctx context.Context, c *bluez.Client, store *core.Store, options Options) error {
 	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
 		return fmt.Errorf("a interface requer um terminal; use bt devices --json ou bt status --json")
 	}
@@ -63,7 +65,10 @@ func Run(ctx context.Context, c *bluez.Client, store *core.Store, adapter string
 	if err != nil {
 		notice = "Agente: " + err.Error() + ". Saia e abra bt novamente para tentar registrar."
 	}
-	m := model{ctx: ctx, client: c, store: store, requests: queue, adapter: adapter, notice: notice, width: 100, height: 30, agentReady: ready, busy: map[string]string{}, filter: "all"}
+	if options.Filter == "" {
+		options.Filter = "all"
+	}
+	m := model{ctx: ctx, client: c, store: store, requests: queue, adapter: options.Adapter, query: options.Query, filter: options.Filter, notice: notice, width: 100, height: 30, agentReady: ready, busy: map[string]string{}, refreshing: true}
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(ctx))
 	go func() {
 		for {
@@ -217,7 +222,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		return m, m.load()
+		if !m.refreshing {
+			m.refreshing = true
+			return m, m.load()
+		}
+		return m, nil
 	case tea.KeyMsg:
 		key := v.String()
 		if key == "ctrl+c" {

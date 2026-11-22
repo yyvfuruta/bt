@@ -193,7 +193,7 @@ func run(ctx context.Context, o options, out io.Writer) error {
 			}
 			adapter = a.Path
 		}
-		return tui.Run(ctx, c, store, adapter)
+		return tui.Run(ctx, c, store, tui.Options{Adapter: adapter, Query: o.search, Filter: o.filter})
 	}
 	ctx, cancel := context.WithTimeout(ctx, o.timeout)
 	defer cancel()
