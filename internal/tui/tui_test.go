@@ -79,7 +79,8 @@ func TestPendingRequestsDoNotBlockNavigation(t *testing.T) {
 	if m.requests.Snapshot()[0].State != "pending" {
 		t.Fatal("accepted without request focus")
 	}
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m.switchResource(requestsResource)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(model)
 	if !strings.Contains(m.View(), "Confirme 123456") {
 		t.Fatal("confirmation code not visible")

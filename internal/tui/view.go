@@ -14,154 +14,204 @@ func (m model) View() string {
 		lines := wrap("Amplie para 48×18. Ctrl+C sai.", max(1, m.width))
 		return strings.Join(lines[:min(len(lines), max(1, m.height))], "\n")
 	}
-	header := "bt · sem adaptador · ? ajuda"
+	header := "bt · sem adaptador"
 	if a, ok := m.adapterValue(); ok {
-		power := "desligado"
-		if a.Powered {
-			power = "ligado"
-		}
-		header = "bt · " + strings.TrimPrefix(a.Path, "/org/bluez/") + " · " + power
-		if a.Discovering {
-			header += " · buscando"
-		}
-		if len(m.adapters) > 1 {
-			header += fmt.Sprintf(" · %d adaptadores", len(m.adapters))
+		header = "bt · " + strings.TrimPrefix(a.Path, "/org/bluez/")
+		if !a.Powered {
+			header += " · desligado (o liga)"
+		} else if a.Discovering {
+			header += " · buscando…"
 		}
 	}
-	lines := []string{ansi.Truncate(core.Clean(header), m.width, "…")}
-	rows := m.rows()
-	position := 0
-	for i, d := range rows {
-		if d.Path == m.selected {
-			position = i + 1
-		}
+	label := string(m.resourceKind())
+	count := m.resourceCount()
+	if m.showDetails {
+		label += " / detalhes"
 	}
-	focus := "> "
-	if m.focusRequests {
-		focus = "  "
-	}
-	filter := map[string]string{"all": "todos", "connected": "conectados", "paired": "pareados", "unpaired": "não pareados"}[m.filter]
 	if m.showHelp {
-		lines = append(lines, "Atalhos")
-	} else {
-		lines = append(lines, fmt.Sprintf("%sDispositivos · %s · %d/%d", focus, filter, position, len(rows)))
-		if m.query != "" {
-			lines = append(lines, ansi.Truncate("Busca: "+core.Clean(m.query), m.width, "…"))
-		}
+		label = "ajuda"
 	}
-	detail := ""
-	if !m.showHelp {
-		if d, ok := m.device(); ok {
-			detail = "MAC " + d.Address
-		} else if len(rows) > 0 {
-			detail = "Use ↑↓ para selecionar novamente."
-		}
+	if m.mode == "command" {
+		label = "recursos"
+		count = len(resourceMatches(m.input))
 	}
-	requests := m.requestView()
+	if !m.showDetails && !m.showHelp || m.mode == "command" {
+		label += fmt.Sprintf(" [%d]", count)
+	}
+	lines := []string{ansi.Truncate(header, m.width, "…"), ansi.Truncate(label, m.width, "…")}
 	footer := m.footer()
-	var messages []string
-	if m.notice != "" {
-		messages = limited(wrap("Aviso: "+m.notice, m.width), 3, m.width)
-	} else if m.event != "" {
-		event := strings.TrimSuffix(m.event, " (evento informativo, sem resposta)")
-		messages = limited(wrap("Evento: "+event+" · informativo", m.width), 2, m.width)
-	}
-	// Reserve the request and input areas before choosing how many devices fit.
-	fixed := len(lines) + 1 + len(requests) + len(messages) + 1 + len(footer)
-	if detail != "" {
-		fixed++
-	}
-	if m.height-fixed < 3 && len(messages) > 1 {
-		fixed -= len(messages) - 1
-		messages = limited(messages, 1, m.width)
-	}
-	budget := max(1, m.height-fixed)
+	messages := m.messages()
+	banner := m.requestBanner()
+	budget := m.contentHeight()
+	content := m
+	content.width -= 4
 	var body []string
-	if m.showHelp {
-		for _, s := range []string{
-			"Enter conectar/desconectar",
-			"c conectar · d desconectar",
-			"s busca · / buscar nome · f filtrar",
-			"p parear · x cancelar pareamento",
-			"n apelido · F esquecer",
-			"a adaptador · o ligar/desligar",
-			"Tab trocar painel · ↑↓ navegar",
-			"y aceitar · n rejeitar (nos pedidos)",
-			"Esc limpar filtros · q ou Ctrl+C sair",
-		} {
-			body = append(body, wrap(s, m.width)...)
+	switch {
+	case m.mode == "command":
+		body = content.resourceChooser()
+	case m.showHelp:
+		all := content.helpLines()
+		start := min(m.detailScroll, max(0, len(all)-budget))
+		body = all[start:min(len(all), start+budget)]
+	case m.showDetails:
+		all := content.detailLines()
+		start := min(m.detailScroll, max(0, len(all)-budget))
+		body = all[start:min(len(all), start+budget)]
+	case m.resourceKind() == adaptersResource:
+		selected := 0
+		items := [][]string{}
+		for i, a := range m.adapterRows() {
+			if a.Path == m.adapterCursor {
+				selected = i
+			}
+			name := core.Clean(a.Name)
+			if name == "" {
+				name = strings.TrimPrefix(a.Path, "/org/bluez/")
+			}
+			state := "desligado"
+			if a.Powered {
+				state = "ligado"
+			}
+			if a.Path == m.adapter {
+				state += " · ativo"
+			}
+			items = append(items, content.listItem(a.Path == m.adapterCursor, name+" · "+state))
 		}
-		body = limited(body, budget, m.width)
-	} else {
-		body = m.deviceViewport(rows, budget)
+		body = viewport(items, selected, budget)
+	case m.resourceKind() == requestsResource:
+		selected := 0
+		items := [][]string{}
+		for i, r := range m.requestRows() {
+			if r.ID == m.requestID {
+				selected = i
+			}
+			name, _ := m.requestIdentity(r)
+			items = append(items, content.listItem(r.ID == m.requestID, name+" · "+requestState(r.State)))
+		}
+		body = viewport(items, selected, budget)
+		if m.event != "" {
+			event := strings.TrimSuffix(m.event, " (evento informativo, sem resposta)")
+			body = append(body, wrap("Evento informativo: "+event, content.width)...)
+		}
+	default:
+		body = content.deviceViewport(m.rows(), budget)
 	}
-	lines = append(lines, body...)
-	for i := len(body); i < budget; i++ {
-		lines = append(lines, "")
+	if len(body) == 0 {
+		body = wrap("Nenhum registro. / filtra; : troca recurso.", content.width)
 	}
-	if detail != "" {
-		lines = append(lines, detail)
+	body = limited(body, budget, content.width)
+	lines = append(lines, "╭"+strings.Repeat("─", m.width-2)+"╮")
+	for i := 0; i < budget; i++ {
+		line := ""
+		if i < len(body) {
+			line = body[i]
+		}
+		lines = append(lines, "│ "+line+strings.Repeat(" ", max(0, content.width-ansi.StringWidth(line)))+" │")
 	}
-	lines = append(lines, "")
-	lines = append(lines, requests...)
+	lines = append(lines, "╰"+strings.Repeat("─", m.width-2)+"╯")
+	lines = append(lines, banner...)
 	lines = append(lines, messages...)
-	lines = append(lines, "")
 	lines = append(lines, footer...)
 	return strings.Join(lines, "\n")
 }
 
-func (m model) deviceLines(d core.Device, budget int) []string {
-	marker := "  "
-	if d.Path == m.selected {
-		marker = "> "
+func (m model) contentHeight() int {
+	return max(1, m.height-4-len(m.footer())-len(m.messages())-len(m.requestBanner()))
+}
+func (m model) resourceCount() int {
+	switch m.resourceKind() {
+	case adaptersResource:
+		return len(m.adapterRows())
+	case requestsResource:
+		return len(m.requestRows())
+	default:
+		return len(m.rows())
 	}
-	name := limited(wrap(d.Label(), m.width-2), 2, m.width-2)
-	connected := "desconectado"
-	if d.Connected {
-		connected = "conectado"
+}
+func (m model) messages() []string {
+	if m.notice != "" {
+		return limited(wrap(m.notice, m.width), 2, m.width)
 	}
-	paired := "não pareado"
-	if d.Paired {
-		paired = "pareado"
-	}
-	battery := "bateria —"
-	if d.Battery != nil {
-		battery = fmt.Sprintf("bateria %d%%", *d.Battery)
-	}
-	metadata := readableType(d.Type) + " · " + connected + " · " + paired + " · " + battery
-	if action := m.busy[d.Path]; action != "" {
-		label := map[string]string{"connect": "conectando…", "disconnect": "desconectando…", "pair": "pareando…", "cancel": "cancelando…", "forget": "esquecendo…"}[action]
-		if label != "" {
-			metadata += " · " + label
+	if m.mode != "command" {
+		filters := []string{}
+		if m.query != "" {
+			filters = append(filters, m.query)
+		}
+		if (m.resourceKind() == devicesResource || m.resourceKind() == connectionsResource) && m.filter != "" && m.filter != "all" {
+			filters = append(filters, m.filter)
+		}
+		if len(filters) > 0 {
+			return []string{ansi.Truncate("Filtro: "+core.Clean(strings.Join(filters, " · ")), m.width, "…")}
 		}
 	}
-	state := wrap(metadata, m.width-4)
-	if len(name)+len(state) > budget {
-		name = limited(name, 1, m.width-2)
-	}
-	lines := []string{marker + name[0]}
-	for _, s := range name[1:] {
-		lines = append(lines, "  "+s)
-	}
-	for _, s := range state {
-		lines = append(lines, "    "+s)
-	}
-	return limited(lines, budget, m.width)
+	return nil
 }
-
+func (m model) requestBanner() []string {
+	if m.focusRequests {
+		return nil
+	}
+	pending, info := 0, false
+	for _, r := range m.requests.Snapshot() {
+		if r.State == "pending" {
+			pending++
+		}
+		if r.State == "info" {
+			info = true
+		}
+	}
+	if pending > 0 {
+		if pending == 1 {
+			return wrap("1 pedido pendente · :requests", m.width)
+		}
+		return wrap(fmt.Sprintf("%d pedidos pendentes · :requests", pending), m.width)
+	}
+	if info {
+		return wrap("Instruções de pareamento · :requests", m.width)
+	}
+	return nil
+}
+func (m model) listItem(selected bool, text string) []string {
+	lines := limited(wrap(text, m.width-2), 2, m.width-2)
+	for i := range lines {
+		prefix := "  "
+		if i == 0 && selected {
+			prefix = "> "
+		}
+		lines[i] = prefix + lines[i]
+	}
+	return lines
+}
 func (m model) deviceViewport(rows []core.Device, budget int) []string {
 	if len(rows) == 0 {
-		return limited(wrap("Nenhum dispositivo. s busca; o liga Bluetooth.", m.width), budget, m.width)
+		text := "Nenhum dispositivo. s inicia busca."
+		if m.resourceKind() == connectionsResource {
+			text = "Nenhuma conexão ativa."
+		}
+		return wrap(text, m.width)
 	}
+	items := [][]string{}
 	selected := 0
 	for i, d := range rows {
 		if d.Path == m.selected {
 			selected = i
 		}
+		label := d.Label()
+		if d.Connected {
+			label += " · conectado"
+		}
+		if d.Battery != nil {
+			label += fmt.Sprintf(" · %d%%", *d.Battery)
+		}
+		if action := m.busy[d.Path]; action != "" {
+			label += " · " + action
+		}
+		items = append(items, m.listItem(d.Path == m.selected, label))
 	}
-	items := make([][]string, len(rows))
-	for i, d := range rows {
-		items[i] = m.deviceLines(d, budget)
+	return viewport(items, selected, budget)
+}
+func viewport(items [][]string, selected, budget int) []string {
+	if len(items) == 0 {
+		return nil
 	}
 	start, end, used := selected, selected+1, len(items[selected])
 	for start > 0 && used+len(items[start-1]) <= budget/2 {
@@ -183,99 +233,119 @@ func (m model) deviceViewport(rows []core.Device, budget int) []string {
 	return lines
 }
 
-func (m model) requestView() []string {
-	rs := m.requests.Snapshot()
-	pending, index := 0, -1
-	for i, r := range rs {
+func (m model) detailLines() []string {
+	var fields []string
+	switch m.resourceKind() {
+	case adaptersResource:
+		a, ok := m.selectedAdapter()
+		if !ok {
+			return []string{"Adaptador removido; Esc volta à lista."}
+		}
+		fields = []string{a.Name, "MAC: " + a.Address, "Caminho: " + a.Path, fmt.Sprintf("Ligado: %t", a.Powered), fmt.Sprintf("Buscando: %t", a.Discovering), "o liga/desliga · s busca · a usa este adaptador"}
+	case requestsResource:
+		r, ok := m.request()
+		if !ok {
+			return []string{"Pedido indisponível; Esc volta à lista."}
+		}
+		name, identity := m.requestIdentity(r)
+		state := requestState(r.State)
 		if r.State == "pending" {
-			pending++
-			if index < 0 {
-				index = i
-			}
+			state += " · expira em " + max(0, time.Until(r.Deadline).Round(time.Second)).String()
+		}
+		fields = []string{name, identity, state, r.Detail}
+		if r.State == "pending" {
+			fields = append(fields, "y aceita · n rejeita")
+		}
+	default:
+		d, ok := m.device()
+		if !ok {
+			return []string{"Dispositivo removido; Esc volta à lista."}
+		}
+		connected := "desconectado"
+		if d.Connected {
+			connected = "conectado"
+		}
+		paired := "não (p cria o vínculo)"
+		if d.Paired {
+			paired = "sim (vínculo salvo)"
+		}
+		battery := "não informada"
+		if d.Battery != nil {
+			battery = fmt.Sprintf("%d%%", *d.Battery)
+		}
+		fields = []string{d.Label(), "MAC: " + d.Address, "Conexão: " + connected, "Pareado: " + paired, "Tipo: " + readableType(d.Type), "Bateria: " + battery, "Adaptador: " + d.Adapter}
+		if d.Name != "" && d.Name != d.Label() {
+			fields = append(fields, "Nome original: "+d.Name)
 		}
 	}
-	if m.focusRequests {
-		for i, r := range rs {
-			if r.ID == m.requestID {
-				index = i
-			}
-		}
+	var lines []string
+	for _, s := range fields {
+		lines = append(lines, wrap(s, m.width)...)
 	}
-	if index < 0 && len(rs) > 0 {
-		index = len(rs) - 1
-	}
-	title := "  Pedidos"
-	if m.focusRequests {
-		title = "> Pedidos"
-	}
-	if pending == 0 {
-		title += " · nenhuma pendente"
-	} else if pending == 1 {
-		title += " · 1 pendente"
-	} else {
-		title += fmt.Sprintf(" · %d pendentes", pending)
-	}
-	if !m.focusRequests && pending > 0 {
-		title += " · Tab responder"
-	}
-	lines := wrap(title, m.width)
-	if index < 0 || m.showHelp {
-		return lines
-	}
-	r := rs[index]
-	state := requestState(r.State)
-	if r.State == "pending" {
-		left := max(0, time.Until(r.Deadline).Round(time.Second))
-		state += " · expira em " + left.String()
-	}
-	if pending == 0 && !m.focusRequests {
-		return append(lines, "Último pedido: "+state)
-	}
-	if m.focusRequests {
-		state += fmt.Sprintf(" · %d/%d", index+1, len(rs))
-	}
-	lines = append(lines, wrap(state, m.width)...)
-	name, identity := "Dispositivo indisponível", r.Device
+	return lines
+}
+func (m model) requestIdentity(r core.Request) (string, string) {
 	for _, d := range m.devices {
 		if d.Path == r.Device {
-			name = d.Label()
-			identity = "MAC " + d.Address
-			break
+			return d.Label(), "MAC: " + d.Address
 		}
 	}
-	lines = append(lines, ansi.Truncate(core.Clean(name), m.width, "…"))
-	lines = append(lines, wrap(identity, m.width)...)
-	return append(lines, limited(wrap(r.Detail, m.width), 2, m.width)...)
+	return "Dispositivo indisponível", r.Device
 }
-
+func (m model) resourceChooser() []string {
+	var lines []string
+	for i, r := range resourceMatches(m.input) {
+		lines = append(lines, m.listItem(i == m.commandIndex, string(r.kind)+" · "+r.label)...)
+		lines = append(lines, wrap("  "+r.description, m.width)...)
+	}
+	if len(lines) == 0 {
+		return []string{"Recurso desconhecido."}
+	}
+	return lines
+}
+func (m model) helpLines() []string {
+	var lines []string
+	for _, s := range []string{": escolher tipo de recurso", "/ filtrar registros da visão atual", "Tab próxima visão · Shift+Tab anterior", "Enter detalhes · Esc voltar", "c conectar · d desconectar", "p parear · x cancelar pareamento", "n apelido · F esquecer", "a adaptador · o ligar/desligar · s busca", "y aceitar · n rejeitar (no pedido aberto)", "q ou Ctrl+C sair"} {
+		lines = append(lines, wrap(s, m.width)...)
+	}
+	return lines
+}
 func (m model) footer() []string {
 	if m.showHelp {
-		return wrap("? ou Esc voltar · q sair", m.width)
+		return wrap("↑↓ rolar · Esc voltar · q sair", m.width)
 	}
 	if m.mode != "" {
-		prompt := map[string]string{
-			"search":   "Buscar · Enter aplicar · Esc voltar",
-			"nickname": "Apelido (vazio remove) · Enter salvar · Esc voltar",
-			"forget":   "Digite esquecer · Enter confirmar · Esc voltar",
-			"answer":   "PIN/chave · Enter enviar · Esc voltar",
-		}[m.mode]
+		prompt := map[string]string{"command": ": recurso · Enter abrir · Esc voltar", "search": "/ filtro · Enter aplicar · Esc voltar", "nickname": "Apelido (vazio remove) · Enter salvar", "forget": "Digite esquecer · Enter confirmar", "answer": "PIN/chave · Enter enviar · Esc voltar"}[m.mode]
 		value := m.input
 		if m.mode == "answer" {
 			value = strings.Repeat("•", len([]rune(value)))
 		}
-		lines := wrap(prompt, m.width)
-		return append(lines, "> "+ansi.TruncateLeft(core.Clean(value), m.width-3, "…")+"▏")
+		value = core.Clean(value)
+		if skip := ansi.StringWidth(value) - (m.width - 3); skip > 0 {
+			value = ansi.TruncateLeft(value, skip+1, "…")
+		}
+		return append(wrap(prompt, m.width), "> "+value+"▏")
 	}
-	if m.focusRequests {
-		return append(wrap("y aceitar · n rejeitar · Tab voltar", m.width), wrap("↑↓ pedidos · ? ajuda · q sair", m.width)...)
+	if m.showDetails {
+		if m.focusRequests {
+			return append(wrap("y aceitar · n rejeitar", m.width), wrap("↑↓ rolar · Esc voltar · q sair", m.width)...)
+		}
+		if m.resourceKind() == adaptersResource {
+			return wrap("a usar · o liga/desliga · Esc voltar", m.width)
+		}
+		action := "c conectar"
+		if d, ok := m.device(); ok {
+			if d.Connected {
+				action = "d desconectar"
+			}
+			if !d.Paired {
+				action += " · p parear"
+			}
+		}
+		return append(wrap(action, m.width), wrap("↑↓ rolar · Esc voltar · ? ações", m.width)...)
 	}
-	action := "conectar"
-	if d, ok := m.device(); ok && d.Connected {
-		action = "desconectar"
-	}
-	return append(wrap("↑↓ navegar · Enter "+action+" · / buscar", m.width), wrap("s busca · Tab pedidos · ? ajuda · q sair", m.width)...)
+	return append(wrap("Enter detalhes · : recursos · / filtrar", m.width), wrap("Tab visões · ? ajuda · q sair", m.width)...)
 }
-
 func readableType(kind string) string {
 	labels := map[string]string{"audio-headset": "fone de ouvido", "audio-headphones": "fone de ouvido", "audio-card": "áudio", "audio-speakers": "alto-falante", "input-keyboard": "teclado", "input-mouse": "mouse", "input-gaming": "controle", "phone": "telefone", "computer": "computador"}
 	if label := labels[kind]; label != "" {

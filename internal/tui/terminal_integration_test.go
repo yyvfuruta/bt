@@ -131,7 +131,22 @@ func TestTerminalRestoration(t *testing.T) {
 			defer func() { _ = cmd.Process.Kill() }()
 			output := &terminalOutput{changed: make(chan struct{}, 1)}
 			go output.read(master)
-			output.wait(t, "Tab pedidos")
+			output.wait(t, "Tab visões")
+			if tc.how == "q" {
+				for _, step := range []struct{ input, visible string }{
+					{":", "recursos [4]"},
+					{"conn", "> conn▏"},
+					{"\r", "connections [0]"},
+					{"/", "/ filtro"},
+					{"fone", "> fone▏"},
+					{"\r", "Filtro: fone"},
+				} {
+					if _, err = master.Write([]byte(step.input)); err != nil {
+						t.Fatal(err)
+					}
+					output.wait(t, step.visible)
+				}
+			}
 			raw, err := unix.IoctlGetTermios(int(slave.Fd()), unix.TCGETS)
 			if err != nil {
 				t.Fatal(err)

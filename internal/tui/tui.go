@@ -38,6 +38,11 @@ type model struct {
 	selected                   string
 	requestID                  uint64
 	focusRequests              bool
+	showDetails                bool
+	resource                   resourceKind
+	queries                    map[resourceKind]string
+	adapterCursor              string
+	detailScroll, commandIndex int
 	showHelp                   bool
 	query, filter, mode, input string
 	editDevice                 core.Device
@@ -108,7 +113,7 @@ func (m model) Init() tea.Cmd { return tea.Batch(m.load(), ticker()) }
 func (m model) rows() []core.Device {
 	ds := []core.Device{}
 	for _, d := range m.devices {
-		if d.Adapter == m.adapter {
+		if d.Adapter == m.adapter && (m.resourceKind() != connectionsResource || d.Connected) {
 			ds = append(ds, d)
 		}
 	}
@@ -131,6 +136,28 @@ func (m model) adapterValue() (bluez.Adapter, bool) {
 	return bluez.Adapter{}, false
 }
 func (m *model) selectFirst() {
+	m.detailScroll = 0
+	if m.resourceKind() == adaptersResource {
+		m.adapterCursor = ""
+		if rows := m.adapterRows(); len(rows) > 0 {
+			m.adapterCursor = rows[0].Path
+		}
+		return
+	}
+	if m.resourceKind() == requestsResource {
+		m.requestID = 0
+		rows := m.requestRows()
+		if len(rows) > 0 {
+			m.requestID = rows[0].ID
+		}
+		for _, r := range rows {
+			if r.State == "pending" {
+				m.requestID = r.ID
+				break
+			}
+		}
+		return
+	}
 	rows := m.rows()
 	m.selected = ""
 	if len(rows) > 0 {
@@ -235,12 +262,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch key {
 			case "?", "esc":
 				m.showHelp = false
+				m.detailScroll = 0
+			case "up", "k", "down", "j":
+				content := m
+				content.width -= 4
+				delta := 1
+				if key == "up" || key == "k" {
+					delta = -1
+				}
+				m.detailScroll = max(0, min(m.detailScroll+delta, max(0, len(content.helpLines())-m.contentHeight())))
 			case "q":
 				return m, tea.Quit
 			}
 			return m, nil
 		}
 		if m.mode != "" {
+			if m.mode == "command" && (key == "up" || key == "down" || key == "tab") {
+				if count := len(resourceMatches(m.input)); count > 0 {
+					delta := 1
+					if key == "up" {
+						delta = count - 1
+					}
+					m.commandIndex = (m.commandIndex + delta) % count
+				}
+				return m, nil
+			}
 			switch key {
 			case "esc":
 				m.mode = ""
@@ -252,6 +298,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			case "enter":
 				switch m.mode {
+				case "command":
+					if err := m.openResourceCommand(); err != nil {
+						m.notice = err.Error()
+						return m, nil
+					}
 				case "search":
 					m.query = m.input
 					m.selectFirst()
@@ -280,6 +331,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.mode = ""
 				m.input = ""
 			default:
+				m.commandIndex = 0
 				if v.Type == tea.KeyRunes && len(m.input) < 256 {
 					m.input += core.Clean(string(v.Runes))
 				}
@@ -290,31 +342,55 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch key {
+		case ":":
+			m.mode = "command"
+			m.input = ""
+			m.commandIndex = 0
+			m.notice = ""
 		case "?":
 			m.showHelp = true
+			m.detailScroll = 0
 		case "q":
 			return m, tea.Quit
-		case "tab":
-			m.focusRequests = !m.focusRequests
-			if m.focusRequests {
-				rs := m.requests.Snapshot()
-				if len(rs) > 0 {
-					m.requestID = rs[len(rs)-1].ID
-					for _, r := range rs {
-						if r.State == "pending" {
-							m.requestID = r.ID
-							break
-						}
-					}
+		case "tab", "shift+tab":
+			current := 0
+			for i, r := range resources {
+				if r.kind == m.resourceKind() {
+					current = i
 				}
 			}
+			delta := 1
+			if key == "shift+tab" {
+				delta = len(resources) - 1
+			}
+			m.switchResource(resources[(current+delta)%len(resources)].kind)
 		case "up", "k", "down", "j":
 			delta := 1
 			if key == "up" || key == "k" {
 				delta = -1
 			}
+			if m.showDetails {
+				content := m
+				content.width -= 4
+				m.detailScroll = max(0, min(m.detailScroll+delta, max(0, len(content.detailLines())-m.contentHeight())))
+				return m, nil
+			}
+			if m.resourceKind() == adaptersResource {
+				rows := m.adapterRows()
+				index := -1
+				for i, a := range rows {
+					if a.Path == m.adapterCursor {
+						index = i
+					}
+				}
+				index = max(0, min(index+delta, len(rows)-1))
+				if len(rows) > 0 {
+					m.adapterCursor = rows[index].Path
+				}
+				return m, nil
+			}
 			if m.focusRequests {
-				rs := m.requests.Snapshot()
+				rs := m.requestRows()
 				idx := -1
 				for i, r := range rs {
 					if r.ID == m.requestID {
@@ -352,11 +428,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "y", "n":
 			if m.focusRequests {
-				var r core.Request
-				for _, item := range m.requests.Snapshot() {
-					if item.ID == m.requestID {
-						r = item
-					}
+				if !m.showDetails {
+					m.notice = "Enter abre o pedido antes de responder"
+					return m, nil
+				}
+				r, ok := m.request()
+				if !ok {
+					m.notice = "Selecione um pedido com as setas"
+					return m, nil
 				}
 				if r.State != "pending" {
 					m.notice = "Este item é informativo ou já foi encerrado"
@@ -373,7 +452,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					m.notice = "Resposta enviada"
 				}
-			} else if key == "n" {
+			} else if key == "n" && m.resourceKind() != adaptersResource {
 				if d, ok := m.device(); ok {
 					m.mode = "nickname"
 					m.input = d.Nickname
@@ -381,12 +460,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "/":
+			m.showDetails = false
 			m.mode = "search"
 			m.input = m.query
 		case "esc":
+			if m.showDetails {
+				m.showDetails = false
+				m.detailScroll = 0
+				return m, nil
+			}
+			if m.resourceKind() != devicesResource {
+				m.switchResource(devicesResource)
+				return m, nil
+			}
 			m.query = ""
 			m.filter = "all"
 			m.selectFirst()
+		case "i":
+			m.showDetails = !m.showDetails
+			m.detailScroll = 0
 		case "f":
 			filters := []string{"all", "connected", "paired", "unpaired"}
 			for i, f := range filters {
@@ -397,6 +489,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.selectFirst()
 		case "a":
+			if m.resourceKind() == adaptersResource {
+				if a, ok := m.selectedAdapter(); ok {
+					m.adapter = a.Path
+					m.notice = "Adaptador ativo: " + a.Path
+				}
+				return m, nil
+			}
 			if len(m.adapters) > 0 {
 				idx := 0
 				for i, a := range m.adapters {
@@ -408,7 +507,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectFirst()
 			}
 		case "s", "o":
-			a, ok := m.adapterValue()
+			a, ok := m.selectedAdapter()
 			if !ok {
 				m.notice = "Adaptador indisponível; conecte um adaptador ou use a para alternar"
 				return m, nil
@@ -431,8 +530,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return resultMsg{key, core.Device{Path: a.Path}, err}
 			}
-		case "enter", "c", "d", "p", "x", "F":
-			if m.focusRequests {
+		case "enter":
+			m.showDetails = true
+			m.detailScroll = 0
+		case "c", "d", "p", "x", "F":
+			if m.focusRequests || m.resourceKind() == adaptersResource {
 				return m, nil
 			}
 			d, ok := m.device()
@@ -441,12 +543,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			action := map[string]string{"c": "connect", "d": "disconnect", "p": "pair", "x": "cancel", "F": "forget"}[key]
-			if key == "enter" {
-				action = "connect"
-				if d.Connected {
-					action = "disconnect"
-				}
-			}
 			if (action == "pair" || action == "connect") && (!m.agentReady || m.client.Agent == nil || !m.client.Agent.Active.Load()) {
 				m.notice = "Agente indisponível; saia e abra bt novamente antes de parear/conectar"
 				return m, nil

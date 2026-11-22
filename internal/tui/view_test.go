@@ -59,119 +59,136 @@ func assertFits(t *testing.T, m model) string {
 	return view
 }
 
-func TestSimpleLayoutFitsTerminal(t *testing.T) {
+func TestResourceLayoutFitsAndKeepsMainViewQuiet(t *testing.T) {
 	for _, size := range [][2]int{{48, 18}, {60, 20}, {80, 24}, {100, 30}, {140, 40}} {
-		t.Run(fmt.Sprintf("%dx%d", size[0], size[1]), func(t *testing.T) {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
 			m := layoutModel(t)
 			m.width, m.height = size[0], size[1]
-			for _, selected := range []int{0, 1, 2} {
-				m.selected = m.devices[selected].Path
-				view := assertFits(t, m)
-				for _, text := range []string{m.devices[selected].Label(), "bateria", "q sair", m.devices[selected].Address} {
-					if !strings.Contains(view, text) {
-						t.Fatalf("selected device or footer missing %q:\n%s", text, view)
-					}
-				}
-			}
-			m.selected = "headphones"
 			view := assertFits(t, m)
-			for _, text := range []string{"fone de ouvido", "conectado", "pareado", "82%"} {
+			for _, text := range []string{"Meu Fone", "conectado", "82%", "devices [3]", ": recursos"} {
 				if !strings.Contains(view, text) {
-					t.Fatalf("metadata hidden %q:\n%s", text, view)
+					t.Fatalf("missing %q:\n%s", text, view)
 				}
 			}
+			for _, text := range []string{"Pareado:", "MAC:", "fone de ouvido", "bateria —", "nenhuma pendente"} {
+				if strings.Contains(view, text) {
+					t.Fatalf("main view cluttered by %q", text)
+				}
+			}
+			m.showDetails = true
+			view = assertFits(t, m)
+			for _, text := range []string{"02:00:00:00:00:01", "Pareado: sim", "fone de ouvido", "82%"} {
+				if !strings.Contains(view, text) {
+					t.Fatalf("detail missing %q:\n%s", text, view)
+				}
+			}
+			m.switchResource(connectionsResource)
+			view = assertFits(t, m)
+			if !strings.Contains(view, "connections [1]") || strings.Contains(view, "Teclado") {
+				t.Fatal(view)
+			}
+			m.switchResource(adaptersResource)
+			assertFits(t, m)
+			m.showDetails = true
+			assertFits(t, m)
 		})
 	}
 }
 
-func TestPendingLayoutKeepsCodeIdentityAndActionsVisible(t *testing.T) {
+func TestRequestsAreSeparateAndRemainVisibleAsNotification(t *testing.T) {
 	m := layoutModel(t)
 	r := pendingConfirmation(t, &m)
 	for _, size := range [][2]int{{48, 18}, {60, 20}, {80, 24}, {100, 30}} {
-		for _, focus := range []bool{false, true} {
-			for _, mode := range []string{"", "search", "nickname", "forget", "answer"} {
-				m.width, m.height = size[0], size[1]
-				m.focusRequests = focus
-				m.requestID = r.ID
-				m.query = "fone"
-				m.notice = strings.Repeat("Falha de conexão. Tente novamente. ", 5)
-				m.mode = mode
-				m.input = strings.Repeat("🎧", 30)
-				view := assertFits(t, m)
-				for _, text := range []string{"000042", "02:00:00:00:00:02", "Pendente"} {
-					if !strings.Contains(view, text) {
-						t.Fatalf("request lost %q:\n%s", text, view)
-					}
-				}
-				if focus && mode == "" && !strings.Contains(view, "n rejeitar") {
-					t.Fatal("rejection hidden")
-				}
-				if mode != "" && !strings.HasSuffix(view, "▏") {
-					t.Fatal("input cursor hidden")
+		m.width, m.height = size[0], size[1]
+		m.switchResource(devicesResource)
+		view := assertFits(t, m)
+		if !strings.Contains(view, ":requests") || strings.Contains(view, "000042") {
+			t.Fatalf("request details leaked into main view:\n%s", view)
+		}
+		m.switchResource(requestsResource)
+		view = assertFits(t, m)
+		if !strings.Contains(view, "Pendente") {
+			t.Fatal(view)
+		}
+		// An approval key in a list cannot approve a code that has not been opened.
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+		m = updated.(model)
+		if m.requests.Snapshot()[0].State != "pending" {
+			t.Fatal("list approved unopened request")
+		}
+		m.notice = ""
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m = updated.(model)
+		for _, mode := range []string{"", "search", "nickname", "forget", "answer"} {
+			m.mode = mode
+			m.input = strings.Repeat("🎧", 30)
+			m.requestID = r.ID
+			view = assertFits(t, m)
+			for _, text := range []string{"000042", "02:00:00:00:00:02", "Pendente"} {
+				if !strings.Contains(view, text) {
+					t.Fatalf("request missing %q:\n%s", text, view)
 				}
 			}
+			if mode != "" && !strings.HasSuffix(view, "▏") {
+				t.Fatal("input cursor hidden")
+			}
 		}
+		m.mode = ""
 	}
 }
 
-func TestWrappingAndViewport(t *testing.T) {
+func TestViewportAndLongNames(t *testing.T) {
 	m := layoutModel(t)
 	m.width = 48
 	m.height = 18
 	m.devices[1].Name = "Teclado 日本語 🎹 com um nome comprido que deve quebrar em linhas"
-	m.devices[1].Type = "controle/periférico"
 	m.selected = "keyboard"
 	view := assertFits(t, m)
-	for _, text := range []string{"日本語", "controle/periférico", "desconectado", "não pareado", "bateria —"} {
-		if !strings.Contains(view, text) {
-			t.Fatalf("text lost %q:\n%s", text, view)
-		}
+	if !strings.Contains(view, "日本語") {
+		t.Fatal(view)
 	}
 	for i := 0; i < 20; i++ {
 		m.devices = append(m.devices, core.Device{Path: fmt.Sprint(i), Adapter: m.adapter, Name: fmt.Sprintf("Dispositivo %d", i)})
 	}
 	m.selected = "19"
-	if view = assertFits(t, m); !strings.Contains(view, "> Dispositivo 19") {
-		t.Fatalf("selected row out of viewport:\n%s", view)
+	view = assertFits(t, m)
+	if !strings.Contains(view, "> Dispositivo 19") {
+		t.Fatal(view)
 	}
+	m.showDetails = true
+	assertFits(t, m)
 }
 
-func TestHelpAndEnter(t *testing.T) {
+func TestHelpEnterAndExplicitDeviceActions(t *testing.T) {
 	m := layoutModel(t)
 	m.width = 48
 	m.height = 18
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	if cmd != nil || !m.showDetails {
+		t.Fatal("Enter must inspect without changing Bluetooth state")
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
 	m = updated.(model)
 	view := assertFits(t, m)
-	for _, text := range []string{"c conectar", "d desconectar", "n apelido", "F esquecer", "o ligar/desligar"} {
-		if !strings.Contains(view, text) {
-			t.Fatalf("help missing %q:\n%s", text, view)
-		}
+	if !strings.Contains(view, ": escolher") {
+		t.Fatal(view)
 	}
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
 	m = updated.(model)
 	if cmd != nil {
-		t.Fatal("help allowed accidental device action")
+		t.Fatal("help allowed accidental action")
 	}
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m = updated.(model)
-	if m.showHelp {
-		t.Fatal("Esc did not close help")
-	}
 	m.client = &bluez.Client{Agent: &bluez.Agent{}}
 	m.client.Agent.Active.Store(true)
 	m.agentReady = true
-	for _, connected := range []bool{false, true} {
-		m.devices[0].Connected = connected
+	for key, want := range map[rune]string{'c': "connect", 'd': "disconnect"} {
 		m.busy = map[string]string{}
-		updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-		next := updated.(model)
-		want := "connect"
-		if connected {
-			want = "disconnect"
-		}
-		if cmd == nil || next.busy["headphones"] != want {
-			t.Fatalf("Enter did not %s", want)
+		updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{key}})
+		if cmd == nil || updated.(model).busy["headphones"] != want {
+			t.Fatalf("action %s missing", want)
 		}
 	}
 }

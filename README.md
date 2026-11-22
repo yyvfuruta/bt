@@ -6,36 +6,66 @@ e scripts. Não executa `bluetoothctl` nem depende de sua saída.
 
 ## Como aparece no terminal
 
-Interface simples, sem colunas fixas: o nome vem primeiro e o estado fica logo
-abaixo. Exemplo em um terminal de 60×20, com dados fictícios:
+Navegação por recursos, inspirada nos [comandos do k9s](https://k9scli.io/topics/commands/): uma visão por vez, filtro próprio e
+detalhes sob demanda. Exemplo em um terminal de 60×18, com dados fictícios:
 
 ```text
-bt · hci0 · ligado · buscando
-> Dispositivos · todos · 2/3
-  Meu Fone
-    fone de ouvido · conectado · pareado · bateria 82%
-> Teclado
-    teclado · desconectado · não pareado · bateria —
-  Dispositivo sem nome · 02:00:00:00:00:03
-    desconhecido · desconectado · não pareado · bateria —
-
-
-MAC 02:00:00:00:00:02
-
-  Pedidos · 1 pendente · Tab responder
-Pendente · expira em 45s
-Teclado
-MAC 02:00:00:00:00:02
-Confirme a chave 000042 nos dois dispositivos
-
-↑↓ navegar · Enter conectar · / buscar
-s busca · Tab pedidos · ? ajuda · q sair
+bt · hci0 · buscando…
+devices [3]
+╭──────────────────────────────────────────────────────────╮
+│ > Meu Fone · conectado · 82%                              │
+│   Teclado                                                │
+│   Dispositivo sem nome · 02:00:00:00:00:03                 │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+╰──────────────────────────────────────────────────────────╯
+1 pedido pendente · :requests
+Enter detalhes · : recursos · / filtrar
+Tab visões · ? ajuda · q sair
 ```
 
-O `>` marca o painel com foco e o dispositivo selecionado. Enter conecta ou
-desconecta. Tab abre o pedido para aceitar com `y` ou rejeitar com `n`; outro Tab
-volta à lista. `?` abre todos os atalhos. O texto do estado quebra em linhas
-quando falta largura, e os pedidos e atalhos ficam reservados no rodapé.
+O `>` marca o registro selecionado. A lista principal mostra nome, conexão e
+bateria disponível. Enter abre tipo, pareamento, MAC e ações nos detalhes;
+Esc volta à lista. Pedidos ficam em sua própria visão, com um aviso curto nas
+outras telas. Nenhuma solicitação rouba o foco ou é aceita automaticamente.
+
+### Recursos e busca
+
+Pressione `:` para escolher o tipo, digite seu nome ou apelido e Enter. ↑/↓
+seleciona uma sugestão. Tab e Shift+Tab alternam as visões diretamente.
+
+| Comando interativo | Apelido | Registros |
+|---|---|---|
+| `:devices` | `:dev` | Dispositivos conhecidos no adaptador ativo |
+| `:connections` | `:conn` | Links Bluetooth conectados no adaptador ativo |
+| `:adapters` | `:ad` | Adaptadores, alimentação e descoberta |
+| `:requests` | `:req` | Pedidos, instruções de pareamento e histórico |
+
+`/` busca registros da visão atual por texto, sem distinguir maiúsculas.
+Cada recurso preserva seu filtro quando você troca de visão. Exemplos:
+
+```text
+:devices fone       → dispositivos com "fone" no nome, apelido, MAC ou tipo
+:connections        → conexões ativas; / depois filtra seus dispositivos
+:adapters usb       → adaptadores com "usb" no nome, endereço ou caminho
+:requests 000042    → pedidos com esse código no conteúdo
+```
+
+Aqui "CRD" é uma analogia ao modelo de navegação por tipos de recurso: são
+visões locais do BlueZ, sem instalação de CRDs ou dependência de Kubernetes.
+Uma conexão corresponde ao estado `Device1.Connected`; não representa sessões
+separadas por perfil, e desaparece da visão quando o link desconecta. Pedidos
+pertencem ao agente em execução e seu histórico fica somente em memória.
+
+Na visão de pedidos, Enter abre identidade, código, prazo e conteúdo antes de
+`y` aceitar ou `n` rejeitar. Instruções informativas e pedidos encerrados têm
+estados próprios e não podem ser aceitos como novas autorizações.
 
 ## Instalação
 
@@ -67,21 +97,22 @@ A busca por rádio começa somente quando você a solicita.
 
 | Tecla | Ação |
 |---|---|
-| ↑/↓ ou j/k | Navegar na lista com foco |
-| Enter na lista | Conectar ou desconectar o dispositivo selecionado |
+| ↑/↓ ou j/k | Navegar nos registros; rolar detalhes ou ajuda |
+| : | Escolher tipo de recurso |
+| Tab / Shift+Tab | Próxima visão / visão anterior |
+| Enter ou i | Abrir detalhes do registro selecionado |
 | ? | Mostrar atalhos; ? ou Esc volta à lista |
 | / | Editar busca; Enter aplica, Esc sai da edição |
 | f | Alternar todos, conectados, pareados e não pareados |
-| Esc fora da edição | Limpar busca e filtro |
-| a | Alternar adaptador |
+| Esc fora da edição | Voltar dos detalhes; voltar a devices; limpar filtro em devices |
+| a | Alternar adaptador; na visão adapters, usar o selecionado |
 | o | Ligar/desligar adaptador selecionado |
 | s | Iniciar/parar sessão de descoberta desse adaptador |
 | c / d | Conectar / desconectar dispositivo selecionado |
 | p / x | Parear / cancelar pareamento |
 | n na lista | Definir apelido local; vazio remove o apelido |
 | F | Esquecer; exige digitar `esquecer` e Enter |
-| Tab | Alternar foco entre dispositivos e solicitações |
-| y / n nas solicitações | Aceitar / rejeitar a solicitação selecionada |
+| y / n nos detalhes de um pedido | Aceitar / rejeitar explicitamente |
 | q ou Ctrl+C | Sair |
 
 PIN e chave numérica são editados ao aceitar o pedido e enviados com Enter.
@@ -103,7 +134,7 @@ outras operações continuam disponíveis. Há limite de 16 pedidos pendentes e
 histórico de até 64 itens, mantido somente em memória.
 
 Cada pedido expira localmente após 90 segundos. O BlueZ pode cancelar antes.
-Aceitação, rejeição, expiração e cancelamento aparecem no painel. `DisplayPinCode`
+Aceitação, rejeição, expiração e cancelamento aparecem em `:requests`. `DisplayPinCode`
 e `DisplayPasskey` são instruções informativas para o dispositivo remoto, não
 autorizações; não podem ser aceitas como se fossem pedidos. Mudanças de conexão
 aparecem como eventos informativos separados. Nunca há resposta afirmativa
@@ -160,7 +191,8 @@ estiver disponível. Tipo vem de Icon, Class ou Appearance; na falta deles,
 aparece `desconhecido`. Não são inventados fabricante, modelo ou percentuais.
 
 Nos subcomandos, o agente próprio rejeita pedidos que exigem entrada humana,
-com orientação para abrir `bt`, usar `p`/`c` e responder via Tab. Isso permite
+com orientação para abrir `bt`, usar `p`/`c` e responder em `:requests`, abrindo
+o pedido com Enter. Isso permite
 conectar dispositivos já pareados sem abrir uma tela e mantém scripts sem
 prompts inesperados. Não há opção de aprovação automática.
 
@@ -215,8 +247,9 @@ Os testes cobrem nomes e ambiguidade, ordem estável, seleção, filtros,
 persistência/mesclagem/remoção, respostas explícitas e concorrentes, validação de
 PIN/chave, cancelamento, expiração, decodificação e seleção de adaptadores.
 A renderização é validada de 48×18 a 140×40, incluindo nomes Unicode, textos
-longos, edição e pedidos pendentes, para manter estado, código, identidade e
-ações dentro do terminal.
+longos, edição e pedidos pendentes. Há testes de escolha e busca de recursos,
+filtros independentes, ciclo de vida das conexões e autorização somente após
+abrir o pedido.
 Os testes de protocolo iniciam um barramento privado com um serviço de teste;
 verificam chamadas D-Bus reais, sinais, agente, rejeição de remetente falso e
 continuidade de leitura durante uma solicitação pendente. São fixtures de teste,
